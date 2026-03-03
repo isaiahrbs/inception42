@@ -1,0 +1,50 @@
+server {
+    # --- SECTION RÉCEPTION ---
+    # Écoute uniquement sur le port 443 avec SSL activé (sécurité TLS).
+    listen 443 ssl;
+    listen [::]:443 ssl;
+
+    # Nom de domaine défini pour le projet.
+    server_name irobinso.42.fr;
+
+    # --- SECTION SÉCURITÉ ---
+    # Chemins vers les fichiers du 'cadenas' générés par nginx_start.sh.
+    ssl_certificate /etc/ssl/certs/nginx.crt;
+    ssl_certificate_key /etc/ssl/private/nginx.key;
+    
+    # On n'utilise que les versions les plus modernes et solides du cryptage.
+    ssl_protocols TLSv1.2 TLSv1.3;
+
+    # --- SECTION FICHIERS ---
+    # Si on ne demande rien de précis, cherche index.php en premier.
+    index index.php;
+
+    # Le dossier racine où sont rangés tous les fichiers du site.
+    # Ce dossier est partagé avec le container WordPress via un volume.
+    root /var/www/html;
+
+    # --- SECTION TRI DES DEMANDES ---
+    
+    # 1. Pour tout ce qui n'est pas du PHP (images, css, js)...
+    location / {
+        # Vérifie si le fichier existe physiquement, sinon passe la main à index.php.
+        try_files $uri $uri/ /index.php$is_args$args;
+    }
+
+    # 2. Pour toutes les demandes de fichiers .php...
+    location ~ \.php$ {
+        # Si le fichier PHP n'existe pas, renvoie une erreur 404 (pas trouvé).
+        try_files $uri =404;
+        fastcgi_split_path_info ^(.+\.php)(/.+)$;
+        
+        # TRANSITION : Envoie la commande au 'cuisinier' (le container WordPress).
+        # Docker DNS transforme 'wordpress' en l'adresse IP interne du container.
+        fastcgi_pass wordpress:9000;
+        
+        # Réglages standards pour parler à PHP-FPM.
+        fastcgi_index index.php;
+        include fastcgi_params;
+        fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
+        fastcgi_param PATH_INFO $fastcgi_path_info;
+    }
+}

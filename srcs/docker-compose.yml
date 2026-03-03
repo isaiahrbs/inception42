@@ -1,0 +1,73 @@
+version: '3' # Version de la syntaxe Docker Compose (la norme pour ce projet)
+
+services: # Début de la définition de nos 3 containers (nos briques d'infrastructure)
+
+  # --- LE SERVICE BASE DE DONNEES ---
+  mariadb:
+    build: # Instructions pour construire l'image personnalisée
+      context: ./requirements/mariadb # Dossier racine contenant le Dockerfile et les configs
+      dockerfile: Dockerfile # Nom du fichier d'instructions de construction
+    container_name: mariadb # Nom fixe du container (essentiel pour que le DNS Docker le trouve)
+    env_file:
+      - .env # Charge les secrets (mots de passe, noms) comme variables d'environnement
+    volumes:
+      - db_data:/var/lib/mysql # Monte le volume 'db_data' sur le dossier interne de MariaDB
+    networks:
+      - inception # Branche MariaDB sur le switch virtuel privé 'inception'
+    restart: always # Redémarre automatiquement le container si le service crash ou si le PC redémarre
+
+  # --- LE SERVICE MOTEUR PHP (WORDPRESS) ---
+  wordpress:
+    build:
+      context: ./requirements/wordpress
+      dockerfile: Dockerfile
+    container_name: wordpress
+    depends_on:
+      - mariadb # S'assure que le container MariaDB est lancé AVANT de lancer WordPress
+    env_file:
+      - .env
+    volumes:
+      - wp_data:/var/www/html # Stocke le code source et les images sur le volume 'wp_data'
+    networks:
+      - inception # Branche WordPress sur le même switch que MariaDB pour qu'ils se parlent
+    restart: always
+
+  # --- LE SERVEUR WEB (L'UNIQUE PORTE D'ENTREE) ---
+  nginx:
+    build:
+      context: ./requirements/nginx
+      dockerfile: Dockerfile
+    container_name: nginx
+    depends_on:
+      - wordpress # S'assure que WordPress est lancé avant Nginx
+    ports:
+      - "443:443" # LE TUNNEL : Relie le port 443 de mon PC (gauche) au port 443 du container (droite)
+    volumes:
+      - wp_data:/var/www/html # Nginx a besoin d'accéder au MEME dossier que WP pour lire les fichiers statiques
+    networks:
+      - inception
+    restart: always
+
+# --- DEFINITION GLOBALE DU RESEAU ---
+networks:
+  inception: # Nom de notre réseau privé
+    name: inception
+    driver: bridge # Mode 'pont' : crée un switch virtuel isolé pour nos containers
+
+# --- DEFINITION GLOBALE DES VOLUMES (PERSISTANCE) ---
+volumes:
+  # Configuration du disque dur pour MariaDB
+  db_data:
+    driver: local # Utilise le stockage de la machine hôte (mon PC)
+    driver_opts:
+      type: none # Pas de système de fichier réseau (comme NFS), juste du local
+      o: bind # Option 'BIND' : force la liaison directe avec un dossier physique
+      device: /home/irobinso/data/mariadb # CHEMIN PHYSIQUE REEL sur mon PC Linux
+  
+  # Configuration du disque dur pour WordPress et Nginx
+  wp_data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /home/irobinso/data/wordpress # CHEMIN PHYSIQUE REEL sur mon PC Linux
